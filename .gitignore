@@ -2,3 +2,5 @@ venv/
 /db
 db/
 db
+
+/furniture_shop_api_django/settings.py

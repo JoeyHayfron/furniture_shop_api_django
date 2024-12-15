@@ -4,20 +4,18 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User
 
 
-class UserSerialier(serializers.ModelSerializer):
+class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = "__all__"
-
-    def get_fields(self):
-        fields = super().get_fields()
-
-        exclude_fields = self.context.get("exclude_fields", [])
-        for field in exclude_fields:
-            fields.pop(field)
-
-        return fields
+        exclude = ("username",)
 
     def create(self, validated_data):
+        validated_data["username"] = validated_data.get("email")
         return User.objects.create_user(**validated_data)
+
+
+class UserSerializerWithoutPassword(UserSerializer):
+    class Meta:
+        model = User
+        exclude = ("password", "username")

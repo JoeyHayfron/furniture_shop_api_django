@@ -1,5 +1,6 @@
-from django.shortcuts import render
-from django.contrib.auth import authenticate, login, get_user
+# from django.shortcuts import render
+from django.contrib.auth import authenticate
+from django.db.models import Q
 
 from rest_framework.decorators import (
     api_view,
@@ -11,7 +12,7 @@ from rest_framework import status
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
 
-from .serializers import UserSerialier
+from .serializers import UserSerializer, UserSerializerWithoutPassword
 from .models import User
 from .utils import get_tokens_for_user
 from helpers.utils import FSPageNumberPagination
@@ -20,32 +21,37 @@ from helpers.utils import FSPageNumberPagination
 @api_view(["POST"])
 @authentication_classes([])
 def register_user(request):
-    context = {"exclude_fields": ["password"]}
     try:
         email = request.data.get("email")
         user_exists = User.objects.all().filter(email=email)
+
         if user_exists:
             return Response(
-                {"message": "User with this email already exists"},
+                {"message": "User with this email or username already exists"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         provider = request.data.get("provider")
         if provider is None:
             return Response(
-                {"message": "provider is required to resgister a user"},
+                {"message": "provider is required to register a user"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         if provider == "password":
-            user_serializer = UserSerialier(data=request.data, context=context)
+            user_serializer = UserSerializer(
+                data=request.data,
+            )
 
             if user_serializer.is_valid(raise_exception=True):
-                user_serializer.save()
-                user = User.objects.get(email=email)
+                user = user_serializer.save()
                 tokens = get_tokens_for_user(user)
+                user_data_without_password = UserSerializerWithoutPassword(
+                    user_serializer.data
+                )
                 return Response(
-                    {**tokens, **user_serializer.data}, status=status.HTTP_201_CREATED
+                    {**tokens, **user_data_without_password.data},
+                    status=status.HTTP_201_CREATED,
                 )
     except Exception as e:
         # TODO: Handle Validation Errors
@@ -67,6 +73,8 @@ def login_user(request):
 
     user_exists = User.objects.get(email=email)
 
+    print(user_exists.check_password(password))
+
     if not user_exists:
         return Response(
             {"message": "User with this email not found"},
@@ -81,7 +89,6 @@ def login_user(request):
             status=status.HTTP_404_NOT_FOUND,
         )
     else:
-        user.pop("password")
         tokens = get_tokens_for_user(user)
         return Response(tokens, status=status.HTTP_200_OK)
 
@@ -92,13 +99,40 @@ def login_user(request):
 def get_all_users(request):
     queryset = User.objects.all().order_by("create_date")
     paginator = FSPageNumberPagination()
-    # This endpoint is only accessible to staff accounts
+    search_query = request.query_params.get("q", None)
 
-    user = get_user(request=request)
-    if not request.user.is_staff:
-        paginated_queryset = paginator.paginate_queryset(
-            queryset=queryset, request=request
+    if search_query:
+        queryset = queryset.filter(
+            Q(first_name__icontains=search_query)
+            | Q(last_name__icontains=search_query)
+            | Q(email__icontains=search_query)
         )
-        print(paginator.get_paginated_response(list(paginated_queryset)))
-        return paginator.get_paginated_response(list(paginated_queryset))
-    return Response({})
+
+    paginated_queryset = paginator.paginate_queryset(queryset=queryset, request=request)
+    user_serialized_data = UserSerializerWithoutPassword(paginated_queryset, many=True)
+    print(paginator.get_paginated_response(user_serialized_data.data))
+    return paginator.get_paginated_response(user_serialized_data.data)
+
+
+@api_view(["GET", "PATCH"])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def get_or_update_user(request, pk):
+    req_user = request.user
+    user_from_pk = User.objects.get(id=pk)
+
+    if not req_user.is_staff and user_from_pk.id != req_user.id:
+        return Response(
+            {"message": "Only admins and account owners can view or edit account"},
+            status=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if request.method == "PATCH":
+        print("SAME THING")
+        # user_serializer = UserSerialier(
+        #     data=request.data, partial=True, context=context
+        # )
+
+
+# TODO
+# Handle forgot password by sending the user an email with a link to a password change site

@@ -1,7 +1,9 @@
 from django.test import TestCase
+from rest_framework.test import APIClient
 from django.urls import reverse
 import json
 from .models import User
+from rest_framework_simplejwt.tokens import AccessToken
 
 
 # Create your tests here.
@@ -15,8 +17,18 @@ class UserViewTestCase(TestCase):
             username="testuser1",
             password="testuser1",
         )
+        self.admin_user = User.objects.create(
+            first_name="Admin",
+            last_name="User",
+            email="adminuser@gmail.com",
+            password="admin_user",
+            is_staff=True,
+            is_superuser=True,
+        )
         self.register_url = reverse("register-user")
         self.users_url = reverse("get-all-users")
+        self.get_user_url = reverse("get-or-update-user", args=[self.test_user.id])
+        self.client = APIClient()
 
     def tearDown(self):
         User.objects.all().delete()
@@ -75,4 +87,27 @@ class UserViewTestCase(TestCase):
         )
 
     def test_fetching_all_users(self):
-        response = self.client.get(self.users_url)
+        token = AccessToken.for_user(self.admin_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(token)}")
+        response = self.client.get(self.users_url, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data.get("results")), 2)
+
+    def test_fetching_a_user(self):
+        token = AccessToken.for_user(self.test_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(token)}")
+        response = self.client.get(self.get_user_url, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("email"), self.test_user.email)
+
+    def test_updating_user_details(self):
+        update_data = {"phone_number": 201513130}
+        token = AccessToken.for_user(self.test_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {str(token)}")
+        response = self.client.patch(
+            self.get_user_url,
+            data=json.dumps(update_data),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data.get("phone_number"), 201513130)

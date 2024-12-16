@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import ValidationError
 
 from .serializers import UserSerializer, UserSerializerWithoutPassword
 from .models import User
@@ -127,12 +128,35 @@ def get_or_update_user(request, pk):
             status=status.HTTP_401_UNAUTHORIZED,
         )
 
-    if request.method == "PATCH":
-        print("SAME THING")
-        # user_serializer = UserSerialier(
-        #     data=request.data, partial=True, context=context
-        # )
+    if not user_from_pk:
+        return Response(
+            {"message": "User with this id does not exist"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
 
+    try:
+        if request.method == "PATCH":
+            user_serializer = UserSerializer(
+                user_from_pk, data=request.data, partial=True
+            )
+            if user_serializer.is_valid(raise_exception=True):
+                user_serializer.save()
+                user_data = UserSerializerWithoutPassword(user_serializer.data)
+                return Response(user_data.data, status=status.HTTP_200_OK)
+            else:
+                return Response({"message": "Please ensure "})
 
-# TODO
-# Handle forgot password by sending the user an email with a link to a password change site
+        if request.method == "GET":
+            user_serializer = UserSerializerWithoutPassword(user_from_pk)
+            return Response(user_serializer.data, status=status.HTTP_200_OK)
+    except ValidationError as err:
+        errors = dict(err.detail)
+        errors_dict = {}
+        for key, value in errors.items():
+            errors_dict[key] = value[0]
+        return Response(errors_dict, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        return Response(
+            {"message": f"An error occurred {e}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
